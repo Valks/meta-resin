@@ -1,23 +1,21 @@
-FILESEXTRAPATHS_append := ":${THISDIR}/files"
+FILESEXTRAPATHS_append := ":${THISDIR}/${PN}-bbappend"
 
-SRC_URI_append = " \
-    file://dnsmasq.conf \
-    file://dnsmasq.conf.systemd \
-    file://resolv.conf \
-    "
+SRC_URI += " \
+	file://dnsmasq.conf.systemd \
+	file://resolv-conf.dnsmasq \
+"
 
-# for dnsmasq versions older than 2.76 we need to still apply the following patch:
-python() {
-    packageVersion = d.getVar('PV', True)
-    srcURI = d.getVar('SRC_URI', True)
-    if packageVersion < '2.76':
-        d.setVar('SRC_URI', srcURI + ' ' + 'file://0001-Treat-REFUSED-not-SERVFAIL-as-an-unsuccessful-upstre.patch')
+inherit update-alternatives
+
+do_install_append () {
+	if ${@bb.utils.contains('DISTRO_FEATURES','systemd','true','false',d)}; then
+		install -d ${D}${sysconfdir}/systemd/system/dnsmasq.service.d
+		install -c -m 0644 ${WORKDIR}/dnsmasq.conf.systemd ${D}${sysconfdir}/systemd/system/dnsmasq.service.d/dnsmasq.conf
+		install -c -m 0644 ${WORKDIR}/resolv-conf.dnsmasq ${D}${sysconfdir}
+	fi
 }
 
-do_install_append() {
-    if ${@bb.utils.contains('DISTRO_FEATURES','systemd','true','false',d)}; then
-        install -d ${D}${sysconfdir}/systemd/system/dnsmasq.service.d
-        install -c -m 0644 ${WORKDIR}/dnsmasq.conf.systemd ${D}${sysconfdir}/systemd/system/dnsmasq.service.d/dnsmasq.conf
-        install -c -m 0644 ${WORKDIR}/resolv.conf ${D}${sysconfdir}
-    fi
-}
+ALTERNATIVE_${PN} = "resolv-conf"
+ALTERNATIVE_TARGET[resolv-conf] = "${sysconfdir}/resolv-conf.dnsmasq"
+ALTERNATIVE_LINK_NAME[resolv-conf] = "${sysconfdir}/resolv.conf"
+ALTERNATIVE_PRIORITY[resolv-conf] = "60"

@@ -5,7 +5,7 @@ INTEGRATION_NON_KCONFIG_PATCH = "file://resin-specific-env-integration-non-kconf
 
 # Machine independent patches
 SRC_URI_append = " \
-    file://resin-specific-env-configuration.patch \
+    file://env_resin.h \
     ${@bb.utils.contains('UBOOT_KCONFIG_SUPPORT', '1', '${INTEGRATION_KCONFIG_PATCH}', '${INTEGRATION_NON_KCONFIG_PATCH}', d)} \
     "
 
@@ -19,16 +19,18 @@ python __anonymous() {
 RESIN_BOOT_PART = "1"
 RESIN_DEFAULT_ROOT_PART = "2"
 RESIN_ENV_FILE = "resinOS_uEnv.txt"
-RESIN_UBOOT_MMC_DEVICES ?= "0 1 2"
+RESIN_UBOOT_DEVICES ?= "0 1 2"
 
 do_generate_resin_uboot_configuration () {
     cat > ${S}/include/config_resin.h <<EOF
-#define RESIN_UBOOT_MMC_DEVICES ${RESIN_UBOOT_MMC_DEVICES}
+#define RESIN_UBOOT_DEVICES ${RESIN_UBOOT_DEVICES}
 #define RESIN_BOOT_PART ${RESIN_BOOT_PART}
 #define RESIN_DEFAULT_ROOT_PART ${RESIN_DEFAULT_ROOT_PART}
 #define RESIN_IMAGE_FLAG_FILE ${RESIN_IMAGE_FLAG_FILE}
 #define RESIN_FLASHER_FLAG_FILE ${RESIN_FLASHER_FLAG_FILE}
 #define RESIN_ENV_FILE ${RESIN_ENV_FILE}
 EOF
+
+    cp ${WORKDIR}/env_resin.h ${S}/include/env_resin.h
 }
 addtask do_generate_resin_uboot_configuration after do_patch before do_configure

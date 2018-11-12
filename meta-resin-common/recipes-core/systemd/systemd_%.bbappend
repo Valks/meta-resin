@@ -1,12 +1,30 @@
 FILESEXTRAPATHS_append := ":${THISDIR}/${PN}"
 
 SRC_URI_append = " \
-    file://remove_systemd-getty-generator.patch \
+    file://coredump.conf \
     file://watchdog.conf \
-    file://resin.target \
-    file://multi-user.conf \
     ${@bb.utils.contains('DISTRO_FEATURES','development-image','','file://coredump.conf',d)} \
+    file://60-resin-update-state.rules \
+    file://resin_update_state_probe \
+    file://0002-core-Avoid-empty-directory-warning-when-we-are-bind-.patch \
     "
+
+python() {
+	import re
+
+	pv = d.getVar('PV', True)
+	srcuri = d.getVar('SRC_URI', True)
+
+	# Versions before 236 are affected by CVE-2017-15908
+	# https://nvd.nist.gov/vuln/detail/CVE-2017-15908
+	# Backport the relevant patch on the affected versions
+	m = re.search('([0-9]*)\+*(.*)',pv)
+	systemd_version = int(m.group(1))
+	if systemd_version <= 229:
+		d.setVar('SRC_URI', srcuri + ' file://0001-resolved-fix-loop-on-packets-with-pseudo-dns-types-229.patch')
+	elif systemd_version < 236:
+		d.setVar('SRC_URI', srcuri + ' file://0001-resolved-fix-loop-on-packets-with-pseudo-dns-types.patch')
+}
 
 FILES_${PN} += " \
     /srv \
@@ -47,29 +65,21 @@ do_install_append() {
     ln -s ${datadir}/zoneinfo ${D}${sysconfdir}/localtime
     ln -s ../proc/self/mounts ${D}${sysconfdir}/mtab
 
-    # resolv.conf is a static file containing the dnsmasq IP and deployed by dnsmasq package
-    rm -rf ${D}/${sysconfdir}/resolv.conf
-
-    # Install our custom resin target
-    install -d ${D}${systemd_unitdir}/system/resin.target.wants
-    install -d ${D}${sysconfdir}/systemd/system/resin.target.wants
-    install -c -m 0644 ${WORKDIR}/resin.target ${D}${systemd_unitdir}/system/
-
-    # multi-user will trigger resin-target
-    install -d ${D}${sysconfdir}/systemd/system/multi-user.target.d/
-    install -c -m 0644 ${WORKDIR}/multi-user.conf ${D}${sysconfdir}/systemd/system/multi-user.target.d/
-
     # We take care of journald flush ourselves
     rm ${D}/lib/systemd/system/sysinit.target.wants/systemd-journal-flush.service
+
+    install -m 0755 ${WORKDIR}/resin_update_state_probe ${D}/lib/udev/resin_update_state_probe
+
+    # Move udev rules into /lib as /etc/udev/rules.d is bind mounted for custom rules
+    mv ${D}/etc/udev/rules.d/*.rules ${D}/lib/udev/rules.d/
 }
 
-# add pool.ntp.org as default ntp server
-PACKAGECONFIG[ntp] = "--with-ntp-servers=pool.ntp.org time1.google.com time2.google.com time3.google.com time4.google.com,,,"
+FILES_udev += "${rootlibexecdir}/udev/resin_update_state_probe"
 
-PACKAGECONFIG_append = " ntp"
+RDEPENDS_${PN}_append = " resin-ntp-config util-linux"
 
-# Network configuration is managed by NetworkManager
-PACKAGECONFIG_remove = "resolved networkd"
+# Network configuration is managed by NetworkManager. ntp is managed by chronyd
+PACKAGECONFIG_remove = "resolved networkd timesyncd"
 
 # Add missing users/groups defined in /usr/lib/sysusers.d/*
 # In this time we avoid creating these at first boot

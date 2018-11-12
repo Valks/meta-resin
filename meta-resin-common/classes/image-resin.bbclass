@@ -6,11 +6,15 @@ inherit image_types_resin
 
 # When building a Resin OS image, we also generate the kernel modules headers
 # and ship them in the deploy directory for out-of-tree kernel modules build
-DEPENDS += "kernel-modules-headers"
+DEPENDS += "coreutils-native jq-native kernel-modules-headers"
 
 # Deploy the license.manifest of the current image we baked
 deploy_image_license_manifest () {
     IMAGE_LICENSE_MANIFEST="${LICENSE_DIRECTORY}/${IMAGE_NAME}/license.manifest"
+    if [ ! -f "${IMAGE_LICENSE_MANIFEST}" ]; then
+        # Pyro and above have renamed this file
+        IMAGE_LICENSE_MANIFEST="${LICENSE_DIRECTORY}/${IMAGE_NAME}/image_license.manifest"
+    fi
     # XXX support for post morty yocto versions
     # Check if we are running on a poky version which deploys to IMGDEPLOYDIR instead
     # of DEPLOY_DIR_IMAGE (poky morty introduced this change)
@@ -43,10 +47,17 @@ init_config_json() {
    echo '{}' > ${1}/config.json
 
    # Default no to persistent-logging
-   echo $(cat ${1}/config.json | jq ".persistentLogging=false") > ${1}/config.json
+   echo $(cat ${1}/config.json | jq -S ".persistentLogging=false") > ${1}/config.json
+
+   # Find board json and extract slug
+   json_path=${RESIN_COREBASE}/../../../${MACHINE}.json
+   slug=$(jq .slug $json_path)
+
+   # Set deviceType for supervisor
+   echo $(cat ${1}/config.json | jq -S ".deviceType=$slug") > ${1}/config.json
 
    if ${@bb.utils.contains('DISTRO_FEATURES','development-image','true','false',d)}; then
-       echo $(cat ${1}/config.json | jq ".hostname=\"resin\"") > ${1}/config.json
+       echo $(cat ${1}/config.json | jq -S ".hostname=\"balena\"") > ${1}/config.json
    fi
 }
 
@@ -126,7 +137,15 @@ resin_boot_dirgen_and_deploy () {
         if [ -z "${dst}" ]; then
             dst="/${src}" # dst was omitted
         fi
-        src="${DEPLOY_DIR_IMAGE}/$src" # src is relative to deploy dir
+        case $src in
+            /* )
+                # Use absolute src paths as they are
+                ;;
+            *)
+                # Relative src paths are considered relative to deploy dir
+                src="${DEPLOY_DIR_IMAGE}/$src"
+                ;;
+        esac
 
         # Check that dst is an absolute path and assess if it should be a directory
         case $dst in
@@ -178,31 +197,58 @@ resin_boot_dirgen_and_deploy () {
 
     # Keep this after everything is ready in the resin-boot directory
     find ${RESIN_BOOT_WORKDIR} -xdev -type f \
-        -not -name ${RESIN_FINGERPRINT_FILENAME}.${RESIN_FINGERPRINT_EXT} \
+        ! -name ${RESIN_FINGERPRINT_FILENAME}.${RESIN_FINGERPRINT_EXT} \
+        ! -name config.json \
         -exec md5sum {} \; | sed "s#${RESIN_BOOT_WORKDIR}##g" | \
         sort -k2 > ${RESIN_BOOT_WORKDIR}/${RESIN_FINGERPRINT_FILENAME}.${RESIN_FINGERPRINT_EXT}
 
     echo "Install resin-boot in the rootfs..."
     cp -rvf ${RESIN_BOOT_WORKDIR} ${IMAGE_ROOTFS}/${RESIN_BOOT_FS_LABEL}
+
+	# This is a sanity check
+	# When updating the hostOS we are using atomic operations for copying new
+	# files in the boot partition. This requires twice the size of a file with
+	# every copy operation. This means that the boot partition needs to have
+	# available at least free space as much as the largest file deployed.
+	# First Calculate size of the data
+	DATA_SECTORS=$(expr $(du --apparent-size -ks ${RESIN_BOOT_WORKDIR} | cut -f 1) \* 2)
+	# Calculate fs overhead
+	DIR_BYTES=$(expr $(find ${RESIN_BOOT_WORKDIR} | tail -n +2 | wc -l) \* 32)
+	DIR_BYTES=$(expr $DIR_BYTES + $(expr $(find ${RESIN_BOOT_WORKDIR} -type d | tail -n +2 | wc -l) \* 32))
+	FAT_BYTES=$(expr $DATA_SECTORS \* 4)
+	FAT_BYTES=$(expr $FAT_BYTES + $(expr $(find ${RESIN_BOOT_WOKDIR} -type d | tail -n +2 | wc -l) \* 4))
+	DIR_SECTORS=$(expr $(expr $DIR_BYTES + 511) / 512)
+	FAT_SECTORS=$(expr $(expr $FAT_BYTES + 511) / 512 \* 2)
+	FAT_OVERHEAD_SECTORS=$(expr $DIR_SECTORS + $FAT_SECTORS)
+	# Find the largest file and calculate the size in sectors
+	LARGEST_FILE_SECTORS=$(expr $(find ${RESIN_BOOT_WORKDIR} -type f -exec du --apparent-size -k {} + | sort -n -r | head -n1 | cut -f1) \* 2)
+	if [ -n "$LARGEST_FILE_SECTORS" ]; then
+		TOTAL_SECTORS=$(expr $DATA_SECTORS \+ $FAT_OVERHEAD_SECTORS \+ $LARGEST_FILE_SECTORS)
+		BOOT_SIZE_SECTORS=$(expr ${RESIN_BOOT_SIZE} \* 2)
+		bbnote "resin-boot: FAT overhead $FAT_OVERHEAD_SECTORS sectors, data $DATA_SECTORS sectors, largest file $LARGEST_FILE_SECTORS sectors, boot size $BOOT_SIZE_SECTORS sectors."
+		if [ $TOTAL_SECTORS -gt $BOOT_SIZE_SECTORS ]; then
+			bbfatal "resin-boot: Not enough space for atomic copy operations."
+		fi
+	fi
 }
 
 QUIRK_FILES ?= " \
-    etc/hostname \
     etc/hosts \
     etc/resolv.conf \
+    etc/mtab \
     "
 resin_root_quirks () {
     # Quirks
-    # We need to save some files that docker shadows with bind mounts
+    # We need to save some files that the container engine shadows with bind mounts
     # https://docs.docker.com/engine/userguide/networking/default_network/configure-dns/
     # Make sure you run this before packing
     if [ "${QUIRK_FILES}" != "" ];then
         for file in ${QUIRK_FILES}; do
-            src=${IMAGE_ROOTFS}/$file
-            dst=${IMAGE_ROOTFS}/quirks/$file
-            if [ -f $src ]; then
-                mkdir -p $(dirname $dst)
-                cp $src $dst
+            src="${IMAGE_ROOTFS}/$file"
+            dst="${IMAGE_ROOTFS}/quirks/$file"
+            if [ -f "$src" ] || [ -L "$src" ]; then
+                mkdir -p $(dirname "$dst")
+                cp -d "$src" "$dst"
             else
                 bbfatal "Quirks: $src doesn't exist."
             fi
@@ -217,11 +263,12 @@ resinhup_backwards_compatible_link () {
         DEPLOY_IMAGE_TAR="${IMGDEPLOYDIR}/${IMAGE_NAME}${IMAGE_NAME_SUFFIX}.tar"
         RESIN_HUP_BUNDLE="${IMGDEPLOYDIR}/${IMAGE_LINK_NAME}.resinhup-tar"
     else
+        IMAGE_NAME_SUFFIX=".rootfs"
         DEPLOY_IMAGE_TAR="${DEPLOY_DIR_IMAGE}/${IMAGE_NAME}${IMAGE_NAME_SUFFIX}.tar"
         RESIN_HUP_BUNDLE="${DEPLOY_DIR_IMAGE}/${IMAGE_LINK_NAME}.resinhup-tar"
     fi
     if [ -f ${DEPLOY_IMAGE_TAR} ]; then
-        ln -sv ${IMAGE_NAME}${IMAGE_NAME_SUFFIX}.tar ${RESIN_HUP_BUNDLE}
+        ln -fsv ${IMAGE_NAME}${IMAGE_NAME_SUFFIX}.tar ${RESIN_HUP_BUNDLE}
     fi
 }
 
@@ -229,11 +276,26 @@ add_image_flag_file () {
     echo "DO NOT REMOVE THIS FILE" > ${DEPLOY_DIR_IMAGE}/${RESIN_FLAG_FILE}
 }
 
+python resin_boot_sanity_handler() {
+  kernel_file = d.getVar('KERNEL_IMAGETYPE', True) + d.getVar('KERNEL_INITRAMFS', True) + d.getVar('MACHINE', True) + '.bin'
+  if kernel_file in d.getVar('RESIN_BOOT_PARTITION_FILES', True):
+    bb.warn("ResinOS only supports having the kernel in the root partition in rootfs/boot/KERNEL_IMAGETYPE. Please remove it from RESIN_BOOT_PARTITION_FILES. This will become a fatal warning in a few releases.")
+}
+
+python balena_udev_rules_sanity_handler() {
+    etc_udev_rules = d.getVar('IMAGE_ROOTFS', True) + '/etc/udev/rules.d/'
+    if os.listdir(etc_udev_rules):
+        bb.warn("udev rules from /etc/udev/rules.d/*.rules will not be used. Please install them in /lib/udev/rules.d/. /etc/udev/rules.d will be bind mounted for os-udevrules")
+        bb.warn("Found the following rules in /etc/udev/rules.d/: " + str(os.listdir(etc_udev_rules)))
+}
+
 ROOTFS_POSTPROCESS_COMMAND += " \
     generate_compressed_kernel_module_deps ; \
     add_image_flag_file ; \
     resin_boot_dirgen_and_deploy ; \
     resin_root_quirks ; \
+    resin_boot_sanity_handler ; \
+    balena_udev_rules_sanity_handler ; \
     "
 IMAGE_POSTPROCESS_COMMAND =+ " \
     deploy_image_license_manifest ; \

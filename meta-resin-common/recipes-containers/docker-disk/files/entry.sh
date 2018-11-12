@@ -1,47 +1,58 @@
-#!/bin/bash
+#!/bin/sh
 
 set -o errexit
 set -o nounset
 
 DOCKER_TIMEOUT=20 # Wait 20 seconds for docker to start
+DATA_VOLUME=/resin-data
+BUILD=/build
+PARTITION_SIZE=${PARTITION_SIZE:-1024}
 
-# Default values
-PARTITION_SIZE=${PARTITION_SIZE:=1024}
+finish() {
+	# Make all files owned by the build system
+	chown -R "$USER_ID:$USER_GID" "${BUILD}"
+}
+trap finish EXIT
 
-# Create sparse file to hold ext4 resin-data partition
-dd if=/dev/zero of=/export/resin-data.img bs=1M count=0 seek=$PARTITION_SIZE
-# now partition the newly created file to ext4
-mkfs.ext4 -E lazy_itable_init=0,lazy_journal_init=0 -i 8192 -F /export/resin-data.img
+# Create user
+echo "[INFO] Creating and setting $USER_ID:$USER_GID."
+groupadd -g "$USER_GID" docker-disk-group || true
+useradd -u "$USER_ID" -g "$USER_GID" -p "" docker-disk-user || true
 
-# Setup the loop device with the disk image
-mkdir /resin-data
-mount -o loop /export/resin-data.img /resin-data
+mkdir -p $DATA_VOLUME/docker
+mkdir -p $DATA_VOLUME/resin-data
 
-# Create the directory structures we use for Resin
-mkdir -p /resin-data/docker
-mkdir -p /resin-data/resin-data
-
-# Start docker with the created image.
-docker daemon -g /resin-data/docker -s aufs &
+# Start docker
+echo "Starting docker daemon with $BALENA_STORAGE storage driver."
+dockerd -g $DATA_VOLUME/docker -s "$BALENA_STORAGE" &
 echo "Waiting for docker to become ready.."
-STARTTIME=$(date +%s)
-ENDTIME=$(date +%s)
+STARTTIME="$(date +%s)"
+ENDTIME="$STARTTIME"
 while [ ! -S /var/run/docker.sock ]
 do
-    if [ $(($ENDTIME - $STARTTIME)) -le $DOCKER_TIMEOUT ]; then
-        sleep 1
-        ENDTIME=$(date +%s)
+    if [ $((ENDTIME - STARTTIME)) -le $DOCKER_TIMEOUT ]; then
+        sleep 1 && ENDTIME=$((ENDTIME + 1))
     else
         echo "Timeout while waiting for docker to come up."
         exit 1
     fi
 done
+echo "Docker started."
 
-if [ -n "${TARGET_REPOSITORY}" ] && [ -n "${TARGET_TAG}" ]; then
-    docker pull $TARGET_REPOSITORY:$TARGET_TAG
-    docker tag $TARGET_REPOSITORY:$TARGET_TAG $TARGET_REPOSITORY:latest
+if [ -n "${PRIVATE_REGISTRY}" ] && [ -n "${PRIVATE_REGISTRY_USER}" ] && [ -n "${PRIVATE_REGISTRY_PASSWORD}" ]; then
+	echo "login ${PRIVATE_REGISTRY}..."
+	docker login -u "${PRIVATE_REGISTRY_USER}" -p "${PRIVATE_REGISTRY_PASSWORD}" "${PRIVATE_REGISTRY}"
 fi
 
-kill -TERM $(cat /var/run/docker.pid) && wait $(cat /var/run/docker.pid) && umount /resin-data
+# Pull in the image
+echo "Pulling ${TARGET_REPOSITORY}:${TARGET_TAG}..."
+docker pull "${TARGET_REPOSITORY}:${TARGET_TAG}"
 
-echo "Docker export successful."
+echo "Stopping docker..."
+kill -TERM "$(cat /var/run/docker.pid)"
+# don't let wait() error out and crash the build if the docker daemon has already been stopped
+wait "$(cat /var/run/docker.pid)" || true
+
+# Export the final data filesystem
+dd if=/dev/zero of=${BUILD}/resin-data.img bs=1M count=0 seek="${PARTITION_SIZE}"
+mkfs.ext4 -E lazy_itable_init=0,lazy_journal_init=0 -i 8192 -d ${DATA_VOLUME} -F ${BUILD}/resin-data.img

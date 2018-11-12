@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 
 help () {
     cat << EOF
@@ -16,7 +16,7 @@ EOF
 }
 
 # Parse arguments
-while [[ $# > 0 ]]; do
+while [ "$#" -gt "0" ]; do
     key=$1
     case $key in
         -h|--help)
@@ -36,31 +36,56 @@ done
 
 # Resin-boot mountpoint
 BOOT_MOUNTPOINT="/mnt/boot"
+FLASHER_FILEFLAG="$BOOT_MOUNTPOINT/resin-image-flasher"
 
 # Default values
 if [ -z "$CONFIG_PATH" ]; then
-    CONFIG_PATH=$BOOT_MOUNTPOINT/config.json
+    if [ -f "$FLASHER_FILEFLAG" ]; then
+        # Flasher stores a volatile file in tmpfs
+        CONFIG_PATH=/mnt/boottmp/config.json
+    else
+        CONFIG_PATH=$BOOT_MOUNTPOINT/config.json
+    fi
 fi
+
+RESIN_BOOT_MOUNTPOINT="/mnt/boot"
 
 # If config.json provides redefinitions for our vars let us rewrite their
 # runtime value
-if [ -f $CONFIG_PATH ]
-then
-    API_ENDPOINT=$(jq --raw-output ".apiEndpoint // empty" $CONFIG_PATH)
-    LISTEN_PORT=$(jq --raw-output ".listenPort // empty" $CONFIG_PATH)
-    MIXPANEL_TOKEN=$(jq --raw-output ".mixpanelToken // empty" $CONFIG_PATH)
-    PUBNUB_PUBLISH_KEY=$(jq --raw-output ".pubnubPublishKey // empty" $CONFIG_PATH)
-    PUBNUB_SUBSCRIBE_KEY=$(jq --raw-output ".pubnubSubscribeKey // empty" $CONFIG_PATH)
-    REGISTRY_ENDPOINT=$(jq --raw-output ".registryEndpoint // empty" $CONFIG_PATH)
-    VPN_ENDPOINT=$(jq --raw-output ".vpnEndpoint // empty" $CONFIG_PATH)
-    DELTA_ENDPOINT=$(jq --raw-output ".deltaEndpoint // empty" $CONFIG_PATH)
-    CONFIG_HOSTNAME=$(jq --raw-output ".hostname // empty" $CONFIG_PATH)
-    PERSISTENT_LOGGING=$(jq --raw-output ".persistentLogging // empty" $CONFIG_PATH)
-    if [ -z "$API_ENDPOINT" -o -z "$LISTEN_PORT" -o -z "$MIXPANEL_TOKEN" -o -z "$PUBNUB_PUBLISH_KEY" -o -z "$PUBNUB_SUBSCRIBE_KEY" -o -z "$REGISTRY_ENDPOINT" -o -z "$VPN_ENDPOINT" ]; then
-        echo "[WARNING] $0 : Couldn't read some variables from $CONFIG_PATH"
-    fi
-    if [ -z "$PERSISTENT_LOGGING" ]; then
-        PERSISTENT_LOGGING=false
+if [ -f $CONFIG_PATH ]; then
+    eval "$(jq -r '@sh "
+         API_ENDPOINT=\(.apiEndpoint // "")
+         LISTEN_PORT=\(.listenPort // "")
+         MIXPANEL_TOKEN=\(.mixpanelToken // "")
+         PUBNUB_PUBLISH_KEY=\(.pubnubPublishKey // "")
+         PUBNUB_SUBSCRIBE_KEY=\(.pubnubSubscribeKey // "")
+         REGISTRY_ENDPOINT=\(.registryEndpoint // "")
+         VPN_ENDPOINT=\(.vpnEndpoint // "")
+         VPN_PORT=\(.vpnPort // "")
+         DELTA_ENDPOINT=\(.deltaEndpoint // "")
+         CONFIG_HOSTNAME=\(.hostname // "")
+         PERSISTENT_LOGGING=\(.persistentLogging // "")
+         COUNTRY=\(.country // "")
+         UUID=\(.uuid // "")
+         PROVISIONING_API_KEY=\(.apiKey // "")
+         DEVICE_API_KEY=\(.deviceApiKey // "")
+         DEVICE_ID=\(.deviceId // "")
+         USER_ID=\(.userId // "")
+         APPLICATION_ID=\(.applicationId // "")
+         DEVICE_TYPE=\(.deviceType // "")
+         REGISTERED_AT=\(.registered_at // "")
+         NTP_SERVERS=\(.ntpServers // "")
+         DNS_SERVERS=\(.dnsServers // "")
+         BALENA_ROOT_CA=\(.balenaRootCA // "")
+         "' $CONFIG_PATH)"
+
+    # Various default values
+    PERSISTENT_LOGGING=${PERSISTENT_LOGGING:-false}
+    VPN_PORT=${VPN_PORT:-443}
+    if [ "$VPN_PORT" = "1723" ]; then
+        # There is a bug in the cli which defaults VPN port to this port.
+        # If this was found in the config assume default 443.
+        VPN_PORT=443
     fi
 else
     echo "[WARNING] $0 : '$CONFIG_PATH' not found."

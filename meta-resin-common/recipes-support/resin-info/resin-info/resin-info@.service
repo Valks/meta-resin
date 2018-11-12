@@ -1,6 +1,7 @@
 [Unit]
 Description=Resin info on %I
 After=resin-supervisor.service
+ConditionVirtualization=!docker
 
 [Service]
 Type=oneshot
@@ -8,4 +9,4 @@ RemainAfterExit=yes
 ExecStart=@BASE_BINDIR@/bash @SBINDIR@/resin-info %I
 
 [Install]
-WantedBy=resin.target
+WantedBy=multi-user.target

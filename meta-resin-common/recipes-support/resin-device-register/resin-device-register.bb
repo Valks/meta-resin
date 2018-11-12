@@ -18,7 +18,7 @@ RDEPENDS_${PN} = " \
     curl \
     jq \
     resin-vars \
-    resin-device-uuid \
+    balena-unique-key \
     "
 
 SYSTEMD_SERVICE_${PN} = "resin-device-register.service"

@@ -7,6 +7,7 @@ PACKAGE_INSTALL = " \
     base-passwd \
     busybox \
     initramfs-module-debug \
+    initramfs-module-fsck \
     initramfs-module-machineid \
     initramfs-module-resindataexpander \
     initramfs-module-rorootfs \
@@ -30,7 +31,7 @@ inherit core-image
 IMAGE_ROOTFS_SIZE = "8192"
 IMAGE_OVERHEAD_FACTOR = "1.0"
 IMAGE_ROOTFS_EXTRA_SPACE = "0"
-IMAGE_ROOTFS_MAXSIZE = "8192"
+IMAGE_ROOTFS_MAXSIZE = "12288"
 
 
 BAD_RECOMMENDATIONS += "busybox-syslog"

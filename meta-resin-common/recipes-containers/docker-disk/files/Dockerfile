@@ -1,9 +1,8 @@
-FROM docker:1.10.3-dind
-
-RUN apk add --update bash util-linux && rm -rf /var/cache/apk/*
-
+FROM docker:17.06-dind
+RUN apk add --update util-linux shadow e2fsprogs && rm -rf /var/cache/apk/*
 ADD entry.sh /entry.sh
-
 RUN chmod a+x /entry.sh
+
+VOLUME /resin-data
 
 CMD /entry.sh

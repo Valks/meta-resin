@@ -59,11 +59,14 @@
 #       a) [optional] Define RESIN_DEFCONFIG_NAME. Default: "resin-defconfig"
 #       b) Add RESIN_DEFCONFIG_NAME to SRC_URI.
 
+inherit kernel-resin-noimage
+
 RESIN_DEFCONFIG_NAME ?= "resin-defconfig"
 
 RESIN_CONFIGS ?= " \
-    docker \
+    balena \
     brcmfmac \
+    cdc-acm \
     ralink \
     r8188eu \
     systemd \
@@ -77,22 +80,32 @@ RESIN_CONFIGS ?= " \
     wd-nowayout \
     xtables \
     audit \
+    governor \
+    mbim \
+    qmi \
+    misc \
+    redsocks \
+    reduce-size \
+    security \
+    zram \
+    ${BALENA_STORAGE} \
     "
 
 #
-# Docker specific kernel configuration
+# Balena specific kernel configuration
 # Keep these updated with
-# https://raw.githubusercontent.com/docker/docker/master/contrib/check-config.sh
+# https://raw.githubusercontent.com/resin-os/balena/master/contrib/check-config.sh
 #
-RESIN_CONFIGS_DEPS[docker] ?= " \
+RESIN_CONFIGS_DEPS[balena] ?= " \
     CONFIG_IP_NF_NAT=y \
     CONFIG_IPV6=y \
     CONFIG_IP_NF_IPTABLES=y \
     CONFIG_NF_CONNTRACK=y \
     CONFIG_NF_CONNTRACK_IPV4=y \
     CONFIG_NETFILTER=y \
+    CONFIG_DEVPTS_MULTIPLE_INSTANCES=y \
     "
-RESIN_CONFIGS[docker] ?= " \
+RESIN_CONFIGS[balena] ?= " \
     CONFIG_ADVISE_SYSCALLS=y \
     CONFIG_MEMCG=y \
     CONFIG_NAMESPACES=y \
@@ -100,7 +113,6 @@ RESIN_CONFIGS[docker] ?= " \
     CONFIG_PID_NS=y \
     CONFIG_IPC_NS=y \
     CONFIG_UTS_NS=y \
-    CONFIG_DEVPTS_MULTIPLE_INSTANCES=y \
     CONFIG_CGROUPS=y \
     CONFIG_CGROUP_CPUACCT=y \
     CONFIG_CGROUP_DEVICE=y \
@@ -128,8 +140,18 @@ RESIN_CONFIGS[docker] ?= " \
     CONFIG_EXT4_FS=y \
     CONFIG_EXT4_FS_POSIX_ACL=y \
     CONFIG_EXT4_FS_SECURITY=y \
+    CONFIG_KEYS=y \
+    CONFIG_MEMCG=y \
+    CONFIG_MEMCG_SWAP=y \
+    "
+
+RESIN_CONFIGS[aufs] = " \
     CONFIG_AUFS_FS=y \
     CONFIG_AUFS_XATTR=y \
+    "
+
+RESIN_CONFIGS[overlay2] = " \
+    CONFIG_OVERLAY_FS=y \
     "
 
 #
@@ -138,6 +160,7 @@ RESIN_CONFIGS[docker] ?= " \
 #
 RESIN_CONFIGS_DEPS[systemd] ?= " \
     CONFIG_DMIID=y \
+    CONFIG_DEVPTS_MULTIPLE_INSTANCES=y \
     "
 RESIN_CONFIGS[systemd] ?= " \
     CONFIG_DEVTMPFS=y \
@@ -155,7 +178,6 @@ RESIN_CONFIGS[systemd] ?= " \
     CONFIG_FW_LOADER_USER_HELPER=n \
     CONFIG_BLK_DEV_BSG=y \
     CONFIG_NET_NS=y \
-    CONFIG_DEVPTS_MULTIPLE_INSTANCES=y \
     CONFIG_IPV6=y \
     CONFIG_AUTOFS4_FS=y \
     CONFIG_TMPFS_POSIX_ACL=y \
@@ -192,7 +214,7 @@ RESIN_CONFIGS[r8188eu] ?= "\
     "
 
 # rt53xx wireless chipset family to the rt2800usb driver.
-# Supported chips: RT5370
+# Supported chips: RT5370 RT5572
 RESIN_CONFIGS_DEPS[ralink] ?= "\
     CONFIG_CFG80211=m \
     CONFIG_MAC80211=m \
@@ -201,6 +223,7 @@ RESIN_CONFIGS_DEPS[ralink] ?= "\
     "
 RESIN_CONFIGS[ralink] ?= "\
     CONFIG_RT2800USB_RT53XX=y \
+    CONFIG_RT2800USB_RT55XX=y \
     "
 
 #
@@ -221,6 +244,7 @@ RESIN_CONFIGS[brcmfmac] ?= " \
 RESIN_CONFIGS_DEPS[leds-gpio] ?= " \
     CONFIG_NEW_LEDS=y \
     CONFIG_LEDS_CLASS=y \
+    CONFIG_GPIOLIB=y \
     "
 RESIN_CONFIGS[leds-gpio] ?= " \
     CONFIG_LEDS_GPIO=y \
@@ -263,6 +287,7 @@ RESIN_CONFIGS_DEPS[hid-multitouch] ?= " \
     "
 RESIN_CONFIGS[hid-multitouch] ?= " \
     CONFIG_HID_MULTITOUCH=m \
+    CONFIG_HIDRAW=y \
     "
 
 RESIN_CONFIGS[ip_set] = " \
@@ -324,6 +349,77 @@ RESIN_CONFIGS[audit] = " \
     CONFIG_AUDITSYSCALL=n \
     "
 
+RESIN_CONFIGS_DEPS[governor] ?= " \
+    CONFIG_CPU_FREQ_DEFAULT_GOV_ONDEMAND=y \
+    "
+
+# support for mbim cell modems
+RESIN_CONFIGS_DEPS[mbim] = " \
+    CONFIG_USB_NET_DRIVERS=m \
+    CONFIG_USB_USBNET=m \
+"
+
+RESIN_CONFIGS[mbim] = " \
+    CONFIG_USB_NET_CDC_MBIM=m \
+    "
+
+# support for qmi cell modems
+RESIN_CONFIGS_DEPS[qmi] = " \
+    CONFIG_USB_NET_DRIVERS=m \
+    CONFIG_USB_USBNET=m \
+"
+
+RESIN_CONFIGS[qmi] = " \
+    CONFIG_USB_NET_QMI_WWAN=m \
+    "
+
+# various other configurations
+RESIN_CONFIGS[misc] = " \
+    CONFIG_USB_SERIAL_CP210X=m \
+    CONFIG_NF_NAT_REDIRECT=m \
+    CONFIG_IP_NF_TARGET_LOG=m \
+    CONFIG_PANIC_TIMEOUT=1 \
+    "
+
+# configs needed for our usage of redsocks
+RESIN_CONFIGS[redsocks] = " \
+    CONFIG_NETFILTER_ADVANCED=y \
+    CONFIG_NETFILTER_XT_MATCH_OWNER=m \
+    CONFIG_NETFILTER_XT_TARGET_REDIRECT=m \
+    "
+
+# disable some large and commonly enabled configs to reduce image size
+RESIN_CONFIGS[reduce-size] = " \
+    CONFIG_OCFS2_FS=n \
+    CONFIG_GFS2_FS=n \
+    CONFIG_REISERFS_FS=n \
+    CONFIG_NTFS_FS=n \
+    CONFIG_JFS_FS=n \
+    CONFIG_HFS_FS=n \
+    CONFIG_HFSPLUS_FS=n \
+    CONFIG_UDF_FS=n \
+    CONFIG_BLK_DEV_DRBD=n \
+    "
+
+# security features
+RESIN_CONFIGS[security] = " \
+    CONFIG_CC_STACKPROTECTOR=y \
+    CONFIG_CC_STACKPROTECTOR_STRONG=y \
+    "
+
+# zram provides a compressed in-memory swap device
+RESIN_CONFIGS[zram] = " \
+    CONFIG_ZSMALLOC=m \
+    CONFIG_ZRAM=m \
+    CONFIG_CRYPTO=y \
+    CONFIG_CRYPTO_LZO=m \
+    "
+
+# USB Modem (CDC ACM) support
+RESIN_CONFIGS[cdc-acm] = " \
+    CONFIG_USB_ACM=m \
+    "
+
 ###########
 # HELPERS #
 ###########
@@ -352,7 +448,7 @@ def appendLineToFile (filepath, line):
 #########
 
 #
-# Add aufs patches
+# Configuration for balena storage
 #
 
 python do_kernel_resin_aufs_fetch_and_unpack() {
@@ -361,10 +457,6 @@ python do_kernel_resin_aufs_fetch_and_unpack() {
     from bb.fetch2.git import Git
 
     kernelsource = d.getVar('S', True)
-
-    if os.path.isdir(kernelsource + "/fs/aufs"):
-        bb.note("The kernel source tree has the fs/aufs directory. Will not fetch and unpack aufs patches.")
-        return
 
     # get the kernel version from the top Makefile in the kernel source tree
     topmakefile = kernelsource + "/Makefile"
@@ -375,6 +467,7 @@ python do_kernel_resin_aufs_fetch_and_unpack() {
     for s in lines:
         m = re.match("VERSION = (\d+)", s)
         if m:
+            kernelversion_major = m.group(1)
             kernelversion = kernelversion + m.group(1)
         m = re.match("PATCHLEVEL = (\d+)", s)
         if m:
@@ -385,6 +478,21 @@ python do_kernel_resin_aufs_fetch_and_unpack() {
         m = re.match("EXTRAVERSION = (\d+)", s)
         if m:
             kernelversion = kernelversion + '.' + m.group(1)
+
+    balena_storage = d.getVar('BALENA_STORAGE', True)
+    bb.note("Kernel will be configured for " + balena_storage + " balena storage driver.")
+
+    # If overlay2, we assume support in the kernel source so no need for extra
+    # patches
+    if balena_storage == "overlay2":
+        if int(kernelversion_major) < 4:
+            bb.fatal("overlay2 is only available from kernel version 4.0. Can't use overlay2 as BALENA_STORAGE.")
+        return
+
+    # Everything from here is for aufs
+    if os.path.isdir(kernelsource + "/fs/aufs"):
+        bb.note("The kernel source tree has the fs/aufs directory. Will not fetch and unpack aufs patches.")
+        return
 
     # define an ordered dictionary with aufs branch names as keys and branch revisions as values
     aufsdict = collections.OrderedDict([
@@ -417,17 +525,28 @@ python do_kernel_resin_aufs_fetch_and_unpack() {
         ('3.18.25+', '0591c3182066555d46564404a29786232d49e977'),
         ('3.19', '2a2a3ee407810b4a3e19c3d5cfdb7f371d5df835'),
         ('4.0', 'f3daf663294ae51cde1105450705a83d7f0abf84'),
-        ('4.1', '0f55e31aefd360c19cc9d38b256c63fdbdb1cb0e'),
-        ('4.1.13+', '149f0ce41b5c17ad206c8399e97f27f62163d179'),
-        ('4.2', 'c41877758208364ab2a3fb4576e08d8521280f0f'),
-        ('4.3', '32a6b994ca7ce59a729ed59cd9e9d2238bdc8b8e'),
-        ('4.4', '7d174ae40b4c9c876ee51aa50fa4ee1f3747de23'),
-        ('4.5', '6dd8031372d2d0c0e134cfc4770f2c5a3f9bc7c4'),
-        ('4.6', '4ae7c7529ad9814789c65832dfb0646ed7b475e5'),
-        ('4.7', '7731e69c5a26de9519332be64d973c91a377a582'),
-        ('4.8', '34599e5c1fbc295f96ffbbc7e8129921e6f79a8a'),
-        ('4.9', '8a73f3f87e9150de4ac807de1562a060112cbbe6'),
-        ('4.10', '14d1526d7436f2e4371893d4ecd4dda3b26f3730'),
+        ('4.1', '779216b4d28c295a6f52787dc35962e6dedcdc8c'),
+        ('4.1.13+', '5757557b36dc5e875e93dbe299e75dd331126d98'),
+        ('4.2', '7696ae969ebcef1b7a74d0d0aeae8857dfb972c1'),
+        ('4.3', '09faae00f970d044ccd90ea8cc9a34545b3ac24d'),
+        ('4.4', '7b00655846641e84c87f9af94985f48e4bb0f2df'),
+        ('4.5', '655770239032bc4dec1e591016e1a3a5307c9f6c'),
+        ('4.6', '058f6e23530e4b38f60725537ad151098ee74437'),
+        ('4.7', '0228f4bae07367afbcccc7b1c98ec438c35fb60e'),
+        ('4.8', 'f1590cdde901ad19fa9800b1a35b557270f29fc0'),
+        ('4.9', '34be418bd4f0bb069e3971c76f5a8d8a6038558a'),
+        ('4.9.9+', '71d20f2f8e0d26779645b1a436d9c7a6f87911a4'),
+        ('4.9.94+', '600b5b31643556b07e9782efb73f3b0092e6a58c'),
+        ('4.10', 'aa5ef5e7a628817b6c2c89acddfc7976bb758bb6'),
+        ('4.11.7+', '017c55ba5613570d44f63c99cfd39c01867dc826'),
+        ('4.12', '31266c01bd88e0053f53f4580adcca03175947b2'),
+        ('4.13', '78cbc7ffc120b21092a984808865f226764eed3b'),
+        ('4.14', '4340a36fe7ea4b87eaee44898567955f299bb0f6'),
+        ('4.14.56+', '5371a2d104057b2209c78dd8a13531d6b0145feb'),
+        ('4.15', '7eb6552aa2e683ba03684dbc5e8851e7a6a5bdff'),
+        ('4.16', '275a263ca77a817a2a5dbae7bbcd1715ad04a209'),
+        ('4.17', 'bb1c365e0ea004821c3caa8cc7e71cc16448bd50'),
+        ('4.18', 'e21af551ad489135fd21a28c7c964665f7d0924f'),
     ])
 
 
@@ -479,11 +598,12 @@ python do_kernel_resin_aufs_fetch_and_unpack() {
 
 # add our task to task queue - we need the kernel version (so we need to have the sources unpacked and patched) in order to know what aufs patches version we fetch and unpack
 addtask kernel_resin_aufs_fetch_and_unpack after do_patch before do_configure
+kernel_resin_aufs_fetch_and_unpack[vardeps] += "BALENA_STORAGE"
 
 # copy needed aufs files and apply aufs patches
 apply_aufs_patches () {
     # bail out if it looks like the kernel source tree already has the fs/aufs directory
-    if [ -d ${S}/fs/aufs ]; then
+    if [ -d ${S}/fs/aufs ] || [ "${BALENA_STORAGE}" != "aufs" ]; then
         exit
     fi
     cp -r ${WORKDIR}/aufs_standalone/Documentation ${WORKDIR}/aufs_standalone/fs ${S}
@@ -556,7 +676,7 @@ do_kernel_resin_injectconfig[dirs] += "${WORKDIR} ${B}"
 # Reconfigure kernel after we inject resin configs
 #
 do_kernel_resin_reconfigure() {
-    eval ${KERNEL_CONFIG_COMMAND}
+    ${KERNEL_CONFIG_COMMAND}
 }
 addtask kernel_resin_reconfigure after do_kernel_resin_injectconfig before do_compile
 do_kernel_resin_reconfigure[vardeps] += "RESIN_CONFIGS RESIN_CONFIGS_DEPS"
@@ -613,10 +733,3 @@ do_deploy_append () {
     install -m 0644 ${D}/boot/Module.symvers-* ${DEPLOYDIR}/Module.symvers
     install -m 0644 ${D}/boot/config-* ${DEPLOYDIR}/.config
 }
-
-# Don't trigger in the kernel image without initramfs
-# Boards should:
-# a) use kernel-image-initramfs and deploy in in the rootfs (ex bbb)
-# b) use boot deployment using RESIN_BOOT_PARTITION_FILES mechanism to deploy
-#    the initramfs bundled kernel image
-RDEPENDS_kernel-base = ""

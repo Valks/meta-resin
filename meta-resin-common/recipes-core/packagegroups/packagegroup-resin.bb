@@ -7,20 +7,24 @@ inherit packagegroup
 
 RESIN_INIT_PACKAGE ?= "resin-init"
 RESIN_MOUNTS ?= "resin-mounts"
-RESIN_REGISTER ?= "docker-disk"
+RESIN_REGISTER ?= "resin-supervisor"
+RESIN_SUPERVISOR ?= "resin-supervisor"
 
 include packagegroup-resin.inc
 
 # Additional packages
 RDEPENDS_${PN} += " \
-    docker-disk \
+    dosfstools \
+    hostapp-update \
+    hostapp-update-hooks \
     resin-filesystem-expand \
     resin-persistent-logs \
     resin-info \
     resin-hostname \
     resin-state-reset \
-    resinhup \
-    aufs-util \
-    ${@bb.utils.contains('RESIN_CONNECTABLE', '1', 'resin-connectable', '', d)} \
-    ${@bb.utils.contains('RESIN_CONNECTABLE', '1', 'resin-provisioner', '', d)} \
+    resin-device-progress \
+    balena-rollback \
+    timeinit \
+    ${@bb.utils.contains('BALENA_STORAGE', 'aufs', 'aufs-util-auplink', '', d)} \
+    ${RESIN_SUPERVISOR} \
     "

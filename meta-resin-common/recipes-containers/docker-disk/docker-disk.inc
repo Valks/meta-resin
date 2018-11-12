@@ -1,47 +1,47 @@
-DESCRIPTION = "Docker data disk image generator"
-LICENSE = "MIT"
-LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302"
+RESIN_CHECK_CONN_URL ?= "index.docker.io"
+DOCKER_PID_FILE ?= "/var/run/docker.pid"
 
-DEPENDS = "util-linux-native"
+# Check if host can reach a specific URL
+# Used for connectivity check
+def connected(d):
+    import socket
 
-inherit deploy
-require docker-utils.inc
+    REMOTE_SERVER = d.getVar('RESIN_CHECK_CONN_URL', True)
+    try:
+        host = socket.gethostbyname(REMOTE_SERVER)
+        testSocket = socket.create_connection((host, 80), 2)
+        testSocket.close()
+        return "yes"
+    except:
+        pass
+    return "no"
 
-SRC_URI = " \
-    file://Dockerfile \
-    file://entry.sh \
-    "
-S = "${WORKDIR}"
+# Check if docker is running and usable for current user
+def usable_docker(d):
+    import os, subprocess
 
-PROVIDES="docker-disk"
-RPROVIDES_${PN} = "docker-disk"
+    # Check docker is running
+    pid_file = d.getVar('DOCKER_PID_FILE', True)
+    try:
+        f = open(pid_file, 'r')
+    except:
+        return "no"
+    pid = f.read()
+    f.close()
+    if not os.path.exists("/proc/%s" % pid):
+        return "no"
 
-PARTITION_SIZE ?= "1024"
+    # Test docker execute permission
+    cmd = "docker images > /dev/null 2>&1"
+    child = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE)
+    cmd_output = child.communicate()[0]
+    if child.returncode != 0:
+        return "no"
 
-do_patch[noexec] = "1"
-do_configure[noexec] = "1"
+    return "yes"
 
-do_compile () {
-    if [ -z "${PARTITION_SIZE}" ]; then
-        bbfatal "docker-disk: PARTITION_SIZE needs to have a value (megabytes)."
-    fi
-
-    # At this point we really need internet connectivity for building the looper
-    if [ "x${@connected(d)}" != "xyes" ]; then
-        bbfatal "docker-disk: Can't compile as there is no internet connectivity on this host."
-    fi
-
-    # Make sure there is at least one available loop device
-    losetup -f > /dev/null 2>&1 || bbfatal "docker-disk: Host must have at least one available loop device."
-
-    docker build -t looper -f ${WORKDIR}/Dockerfile ${WORKDIR}
-    docker run --rm --privileged -e PARTITION_SIZE=${PARTITION_SIZE} -e TARGET_REPOSITORY=${TARGET_REPOSITORY} -e TARGET_TAG=${TARGET_TAG} -v /sys/fs/cgroup:/sys/fs/cgroup:ro -v ${B}:/export looper
+python () {
+    # We need docker on host
+    if usable_docker(d) != "yes":
+        bb.fatal("docker-disk: Docker needs to run on your host and current user must be able to use it.")
 }
-do_compile[vardeps] += "PARTITION_SIZE TARGET_REPOSITORY TARGET_TAG"
-
-do_deploy () {
-    install ${B}/resin-data.img ${DEPLOYDIR}/resin-data.img
-}
-addtask deploy before do_package after do_install
-
-PACKAGE_ARCH = "${MACHINE_ARCH}"

@@ -4,10 +4,10 @@
 # NOTE: path is relative to PKGD directory
 FILES_COMPRESS ?= ""
 
-DEPENDS_append = " upx"
+DEPENDS_append = " upx-native"
 
 UPX ?= "${STAGING_BINDIR_NATIVE}/upx"
-UPX_ARGS ?= "--best -q"
+UPX_ARGS ?= "--lzma --best -q"
 
 find_and_compress() {
     # Sanity check
@@ -26,4 +26,4 @@ find_and_compress() {
     fi
 }
 
-do_package[postfuncs] += "find_and_compress"
+PACKAGEBUILDPKGD += "find_and_compress"
